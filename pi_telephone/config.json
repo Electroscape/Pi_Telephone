@@ -1,0 +1,32 @@
+{
+    "contacts": {
+        "90011123": "Accomplice.wav",
+        "071101232267": "Albrecht.wav",
+        "86753489": "TaxiGerst.wav"
+    },
+    "PIN":{
+        "hh":{
+            "PHONE_switch_pin": 12    
+        },
+
+        "st":{
+            "PHONE_switch_pin": 12  
+        }
+
+    },
+    "IP":{
+        "hh":{
+            "ip_address": "192.168.87.150",
+            "port":   5560
+        },
+
+        "st":{
+            "ip_address": "192.168.87.150",
+            "port":   5560
+
+        }
+
+    }
+
+
+}
