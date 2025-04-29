@@ -6,7 +6,8 @@ sudo pkill -9 -f telephone.py
 pkill flask
 pkill chromium
 
-cd "${0%/*}"
+cd "${0%/*}" || exit
+
 export XDG_RUNTIME_DIR=/run/user/1000
 export PULSE_SERVER=unix:/run/user/1000/pulse/native
 export DISPLAY=:0
