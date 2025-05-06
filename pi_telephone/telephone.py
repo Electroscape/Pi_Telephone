@@ -24,6 +24,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 root_path = Path(os.getcwd())
 print(f"root path of the script: {root_path}")
 sound_path = root_path.joinpath("sounds")
+# store the specific project sound files here and add them into the config json
+sound_path_local = sound_path.joinpath("local_project")
 
 GPIO.setmode(GPIO.BOARD)
 logging.basicConfig(
@@ -59,7 +61,7 @@ class Telephone:
             self.dial_delay = 3
             self.location = _location
             # set to board, board 12 is GPIO 18
-            self.phone_pin = cfg["PIN"][_location]["PHONE_switch_pin"]
+            self.phone_pin = 12
             GPIO.setup(self.phone_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
             self.last_keypress = dt.now()
             self.running_call = False
@@ -148,7 +150,7 @@ class Telephone:
             sound_file = self.contacts.get(self.number_dialed, False)
             if sound_file:
                 self.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
-                self.sound_queue = [sound_path.joinpath(self.language + sound_file)]
+                self.sound_queue = [sound_path_local.joinpath(self.language + sound_file)]
                 self.sound_queue.append(sound_path.joinpath("beepSound.wav"))
                 self.add_to_history(sound_file)
             else:
