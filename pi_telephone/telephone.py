@@ -25,7 +25,12 @@ root_path = Path(os.getcwd())
 print(f"root path of the script: {root_path}")
 sound_path = root_path.joinpath("sounds")
 # store the specific project sound files here and add them into the config json
-sound_path_local = sound_path.joinpath("local_project")
+
+parent_path = root_path.parent.joinpath("telephone_cfg")
+
+sound_path_local = parent_path.joinpath("sounds")
+if not sound_path_local.exists():
+    sound_path_local = sound_path.joinpath("local_project")
 
 GPIO.setmode(GPIO.BOARD)
 logging.basicConfig(
@@ -104,8 +109,11 @@ class Telephone:
 
     @staticmethod
     def __get_cfg():
+        config_path = parent_path.joinpath("config.json")
+        if not config_path.exists():
+            config_path = 'config.json'
         try:
-            with open('config.json', 'r') as config_file:
+            with open(config_path, 'r') as config_file:
                 return json.load(config_file)
         except (FileNotFoundError, ValueError) as err:
             logging.error(f"failed to fetch config file {err}")
