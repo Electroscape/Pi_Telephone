@@ -33,12 +33,15 @@ if not sound_path_local.exists():
     sound_path_local = sound_path.joinpath("local_project")
 
 GPIO.setmode(GPIO.BOARD)
+
+'''
 logging.basicConfig(
     filename='log.log',
-    level=logging.DEBUG,
+    level=logging.ERROR,
     format="{asctime} {levelname:<8} {message}",
     style='{'
 )
+'''
 
 argparser = argparse.ArgumentParser(description='Telephone')
 argparser.add_argument('-c', '--city', default='st', help='name of the city: [hh / st]')
@@ -82,7 +85,8 @@ class Telephone:
             self.loop.start()
 
         except KeyError as er:
-            logging.error(er)
+            print()
+            # logging.error(er)
 
     def on_press(self, key):
         with self.lock:
@@ -116,7 +120,7 @@ class Telephone:
             with open(config_path, 'r') as config_file:
                 return json.load(config_file)
         except (FileNotFoundError, ValueError) as err:
-            logging.error(f"failed to fetch config file {err}")
+            # logging.error(f"failed to fetch config file {err}")
             exit(f"failed to fetch config file {err}")
 
 
@@ -128,7 +132,7 @@ class Telephone:
             if not dialing:
                 self.play_obj.wait_done()
         except FileNotFoundError:
-            logging.error(f"failed to find sound {sound_file}")
+            # logging.error(f"failed to find sound {sound_file}")
             print(f"failed to find sound {sound_file}")
             pass
 
@@ -141,7 +145,6 @@ class Telephone:
     def pause_current_sound(self):
         self.sound_queue = []
         sa.stop_all()
-        logging.info("Pausing all sounds")
 
     @staticmethod
     def add_to_history(number):
@@ -189,6 +192,7 @@ class Telephone:
                 key = self.key_events.pop(0)
                 update = True
                 self.number_dialed += f"{key}"
+                print(f"{key}")
                 self.pause_current_sound()
                 self.play_sound(sound_path.joinpath(f"{key}.wav"), True)
 
@@ -196,7 +200,7 @@ class Telephone:
             send_number(self.number_dialed)
             txt = "number dialed is " + self.number_dialed
             print(txt)
-            logging.info(txt)
+            # logging.info(txt)
 
     def phone_down(self):
         self.reset_dialing()
@@ -222,7 +226,7 @@ class Telephone:
 
 
     def main_loop(self):
-        logging.info("phone mainloop")
+        print("phone mainloop")
         last_check_time = perf_counter()  # Track time instead of sleeping
 
         while True:
@@ -253,7 +257,8 @@ def send_number(number):
     try:
         socketio.emit("update_number", number)
     except Exception as exp:
-        logging.error(exp)
+        print()
+        # logging.error(exp)
 
 
 @app.route("/get-history")
@@ -271,7 +276,7 @@ def main():
     global phone
     phone = Telephone(location)
 
-    logging.info("Telephone app is running")
+    print("Telephone app is running")
     # phone.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
     # Debug True will cause a double instance of the telephone making a mulitple executions of sounds
     socketio.run(app, debug=False, host='0.0.0.0', port=5500, allow_unsafe_werkzeug=True)
