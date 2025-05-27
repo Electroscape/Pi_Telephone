@@ -26,10 +26,11 @@ print(f"root path of the script: {root_path}")
 sound_path = root_path.joinpath("sounds")
 # store the specific project sound files here and add them into the config json
 
-parent_path = root_path.parent.joinpath("telephone_cfg")
+parent_path = root_path.parent.joinpath("Pi_Telephone_files")
 
 sound_path_local = parent_path.joinpath("sounds")
 if not sound_path_local.exists():
+    print("defaulting to testing config")
     sound_path_local = sound_path.joinpath("local_project")
 
 GPIO.setmode(GPIO.BOARD)
