@@ -39,6 +39,8 @@
     <button onclick="changeLanguage('en')">
         <img src="{{ url_for('static', filename='flags/Flag_of_the_United_States.svg') }}" width="30"> English
     </button>
+    <button id="ring-button" style="margin: 20px;" onClick="ringPhone()">Ring the phone
+    </button>
 
     <script>
         const socket = io.connect('http://' + document.domain + ':' + location.port);
@@ -73,6 +75,14 @@
             .then(response => response.json())
             .then(data => console.log("Language changed to:", data.language))
             .catch(error => console.error("Error:", error));
+        }
+
+        function ringPhone() {
+            fetch("/ring-phone", {
+                method: "POST"
+            })
+            .then(response => response.json())
+            .then(data => console.log(data.status));
         }
 
         // Fetch history on page load

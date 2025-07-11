@@ -5,6 +5,9 @@ import os
 
 import simpleaudio as sa
 from pynput import keyboard
+import numpy as np
+import vlc
+
 
 try:
     import RPi.GPIO as GPIO
@@ -12,7 +15,7 @@ except ImportError:
     import Mock.GPIO as GPIO
 from time import sleep, perf_counter
 
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 from pathlib import Path
 from datetime import datetime as dt, timedelta
 from flask import Flask, render_template, request, jsonify
@@ -26,9 +29,9 @@ print(f"root path of the script: {root_path}")
 sound_path = root_path.joinpath("sounds")
 # store the specific project sound files here and add them into the config json
 
-parent_path = root_path.parent.joinpath("Pi_Telephone_files")
+parent_path = root_path.joinpath("Pi_Telephone_files")
 
-sound_path_local = parent_path.joinpath("sounds")
+sound_path_local = parent_path.joinpath("sounds/local_project")
 if not sound_path_local.exists():
     print("defaulting to testing config")
     sound_path_local = sound_path.joinpath("local_project")
@@ -52,6 +55,16 @@ location = argparser.parse_args().city
 dialed_numbers = []
 
 
+class ThreadEventWrapper:
+    #Wrapper around threading.Event to use with ring-and-play logic.
+    def __init__(self):
+        self._event = Event()
+    def is_set(self):
+        return self._event.is_set()
+    def set(self):
+        self._event.set()
+
+
 class Telephone:
     def __init__(self, _location):
         cfg = self.__get_cfg()
@@ -64,6 +77,8 @@ class Telephone:
         self.call_active = False
         self.play_obj = None
         self.lock = Lock()
+        self.external_ringing = False
+        self.vlc_player = None
         try:
             self.contacts = cfg["contacts"]
             self.language = "deu/"
@@ -125,17 +140,30 @@ class Telephone:
             exit(f"failed to fetch config file {err}")
 
 
-    def play_sound(self, sound_file, dialing=False):
+    def play_sound(self, sound_file, dialing=False, volume=0.2):
         try:
             print(sound_file)
             wave_obj = sa.WaveObject.from_wave_file(str(sound_file))
+
+            # Clamp and apply volume scaling
+            volume = max(0.0, min(1.0, volume))
+            audio_data = np.frombuffer(wave_obj.audio_data, dtype=np.int16)
+            audio_data = (audio_data * volume).astype(np.int16)
+
+            wave_obj = sa.WaveObject(
+                audio_data.tobytes(),
+                num_channels=wave_obj.num_channels,
+                bytes_per_sample=wave_obj.bytes_per_sample,
+                sample_rate=wave_obj.sample_rate
+            )
+
             self.play_obj = wave_obj.play()
             if not dialing:
                 self.play_obj.wait_done()
         except FileNotFoundError:
             # logging.error(f"failed to find sound {sound_file}")
             print(f"failed to find sound {sound_file}")
-            pass
+            self.play_obj = None
 
     def set_german(self, is_german):
         if is_german:
@@ -162,7 +190,7 @@ class Telephone:
             sound_file = self.contacts.get(self.number_dialed, False)
             if sound_file:
                 self.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
-                self.sound_queue = [sound_path_local.joinpath(self.language + sound_file)]
+                self.sound_queue = [sound_path_local.joinpath(self.language + sound_file)] #important for end message!
                 self.sound_queue.append(sound_path.joinpath("beepSound.wav"))
                 self.add_to_history(sound_file)
             else:
@@ -226,11 +254,87 @@ class Telephone:
                     self.play_sound(self.sound_queue.pop(0))
 
 
+    def ring_and_play_message(self):
+        #Plays a ringing sound in a loop using VLC until the phone is picked up, then plays a message once.
+
+        def play_looping_ring(stop_event):
+            ring_path = sound_path.joinpath("telephone-ring.wav")
+            try:
+                self.vlc_player = vlc.MediaPlayer(str(ring_path))
+                
+                while not stop_event.is_set():
+                    self.vlc_player.stop()
+                    self.vlc_player.play()
+                    sleep(0.1)  # Let playback start
+                    self.vlc_player.audio_set_volume(160)  # Louder volume for ringing
+                    print(" Volume "+ str(self.vlc_player.audio_get_volume()))
+                    sleep(0.5)  # Allow playback to begin
+                    while self.vlc_player.get_state() == vlc.State.Playing and not stop_event.is_set():
+                        sleep(0.1)
+
+            except Exception as e:
+                print(f"Error playing ring sound: {e}")
+
+        def wait_for_pickup():
+            return GPIO.input(self.phone_pin) == GPIO.LOW  # Off-hook (picked up)
+
+        stop_event = ThreadEventWrapper()
+        ring_thread = Thread(target=play_looping_ring, args=(stop_event,))
+        ring_thread.start()
+        self.add_to_history("Ringing phone")
+
+        print("Ringing phone... Waiting for pickup.")
+        try:
+            self.external_ringing = True  # Block main loop
+
+            while not wait_for_pickup():
+                sleep(0.1)
+
+        finally:
+            stop_event.set()
+            if self.vlc_player:
+                self.vlc_player.stop()
+            ring_thread.join()
+
+        print("Phone picked up. Playing message.")
+        sleep(1)  # Optional delay for realism
+
+        message_path = sound_path_local.joinpath(self.language + "End.wav")
+        try:
+            self.vlc_player = vlc.MediaPlayer(str(message_path))
+            self.vlc_player.play()
+            sleep(0.1)  # Let playback start
+            self.vlc_player.audio_set_volume(75)  # Lower volume for private listening
+
+            while self.vlc_player.get_state() != vlc.State.Ended:
+                if GPIO.input(self.phone_pin) == GPIO.HIGH:  # Handset put down
+                    self.vlc_player.stop()
+                    print("Message stopped due to handset being placed down.")
+                    break
+                sleep(0.1)
+
+        except Exception as e:
+            print(f"Error playing message: {e}")
+        
+        self.vlc_player = vlc.MediaPlayer(str(sound_path.joinpath("beepSound.wav")))
+        self.vlc_player.play()
+        sleep(0.1)  # Let playback start
+        self.vlc_player.audio_set_volume(75)  # Lower volume for private listening
+        while self.vlc_player.get_state() != vlc.State.Ended:
+            sleep(0.1)
+
+        self.add_to_history("End.wav")
+        self.external_ringing = False  # Resume main loop
+
+
     def main_loop(self):
         print("phone mainloop")
         last_check_time = perf_counter()  # Track time instead of sleeping
 
         while True:
+            if self.external_ringing:
+                sleep(0.1)
+                continue
 
             if GPIO.input(self.phone_pin):
                 self.phone_down()
@@ -260,6 +364,16 @@ def send_number(number):
     except Exception as exp:
         print()
         # logging.error(exp)
+
+
+@app.route("/ring-phone", methods=["POST"])
+def ring_phone():
+    try:
+        phone.ring_and_play_message()
+        return jsonify({"status": "ringing"}), 200
+    except Exception as e:
+        print(f"/ring-phone error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/get-history")
