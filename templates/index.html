@@ -40,6 +40,14 @@
         <img src="{{ url_for('static', filename='flags/Flag_of_the_United_States.svg') }}" width="30"> English
     </button>
 
+    <h2>Call user</h2>
+    {% for caller, info in incoming_callers.items() %}
+        <button onclick="triggerIncomingCall('{{ caller }}')">
+            <img src="{{ url_for('static', filename='flags/Flag_of_the_United_States.svg') }}" width="30"> {{ caller }}
+        </button>
+    {% endfor %}
+
+
     <script>
         const socket = io.connect('http://' + document.domain + ':' + location.port);
 
@@ -74,6 +82,19 @@
             .then(data => console.log("Language changed to:", data.language))
             .catch(error => console.error("Error:", error));
         }
+
+        function triggerIncomingCall() {
+            fetch("/incoming-call", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ call: true })
+            }).then(response => response.json())
+              .then(data => console.log("Call triggered:", data))
+              .catch(err => console.error("Call trigger failed", err));
+        }
+
 
         // Fetch history on page load
         fetchHistory();

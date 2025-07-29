@@ -68,6 +68,7 @@ class Telephone:
         self.lock = Lock()
         try:
             self.contacts = cfg["contacts"]
+            self.incoming_callers = cfg["incoming"]
             self.language = "deu/"
             self.dial_delay = 3
             self.location = _location
@@ -282,6 +283,15 @@ def set_language():
         return jsonify({"message": "Language updated", "language": selected_language}), 200
     return jsonify({"error": "Invalid request"}), 400
 
+@app.route("/incoming-call", methods=["POST"])
+def incoming_call():
+    print("received an incoming call")
+    data = request.get_json()
+    if "caller" in data:
+        caller = data["caller"]
+        phone.play_sound(sound_path.joinpath("leon.wav"), True, 5)
+    return jsonify({"message": "incoming call from ", "caller": data}), 200
+
 
 def send_number(number):
     print(f"Emitting number: {number}")
@@ -300,13 +310,13 @@ def get_history():
 # Web route to render the frontend
 @app.route("/", methods=["GET", "POST"])
 def index():
-    return render_template("index.html")
+    return render_template("index.html", incoming_callers=phone.incoming_callers)
 
 
 def main():
     global phone
     phone = Telephone(location)
-    phone.play_sound(sound_path.joinpath("beepSound.wav"), False, 0.5)
+    # phone.play_sound(sound_path.joinpath("beepSound.wav"), False, 0.5)
 
     print("Telephone app is running")
     # phone.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
