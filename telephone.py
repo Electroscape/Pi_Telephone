@@ -5,6 +5,8 @@ import os
 
 import simpleaudio as sa
 from pynput import keyboard
+from scipy.io import wavfile
+import numpy as np
 
 try:
     import RPi.GPIO as GPIO
@@ -86,7 +88,7 @@ class Telephone:
             self.loop.start()
 
         except KeyError as er:
-            print()
+            print(er)
             # logging.error(er)
 
     def on_press(self, key):
@@ -124,18 +126,46 @@ class Telephone:
             # logging.error(f"failed to fetch config file {err}")
             exit(f"failed to fetch config file {err}")
 
+    def get_scaled_sound(self, sound_file, volume):
+        rate, data = wavfile.read(sound_file)
 
-    def play_sound(self, sound_file, dialing=False):
+        # Normalize to int16 if needed
+        if data.dtype == np.int16:
+            scaled = (data * volume).astype(np.int16)
+        elif data.dtype == np.int32:
+            scaled = (data / (2 ** 16) * volume).astype(np.int16)
+        elif data.dtype == np.uint8:
+            # Center and scale unsigned 8-bit to signed 16-bit
+            centered = data.astype(np.int16) - 128
+            scaled = (centered * 256 * volume).astype(np.int16)
+        elif data.dtype == np.float32:
+            # Scale float [-1.0, 1.0] to int16
+            scaled = (data * 32767 * volume).astype(np.int16)
+        else:
+            raise ValueError(f"Unsupported WAV format: {data.dtype}")
+
+        # num_channels = 1 if len(scaled.shape) == 1 else scaled.shape[1]
+        # sa.play_buffer(scaled, num_channels, 2, rate)
+        return scaled
+
+    def play_sound(self, sound_file, dialing=False, volume=1):
         try:
             print(sound_file)
-            wave_obj = sa.WaveObject.from_wave_file(str(sound_file))
-            self.play_obj = wave_obj.play()
+            if volume == 1:
+                wave_obj = sa.WaveObject.from_wave_file(str(sound_file))
+                self.play_obj = wave_obj.play()
+            else:
+                rate, _ = wavfile.read(sound_file)
+                data = self.get_scaled_sound(sound_file, volume)
+
+                num_channels = 1 if len(data.shape) == 1 else data.shape[1]
+                bytes_per_sample = 2  # because we cast to int16
+                self.play_obj = sa.play_buffer(data, num_channels, bytes_per_sample, rate)
+
             if not dialing:
                 self.play_obj.wait_done()
         except FileNotFoundError:
-            # logging.error(f"failed to find sound {sound_file}")
             print(f"failed to find sound {sound_file}")
-            pass
 
     def set_german(self, is_german):
         if is_german:
@@ -232,7 +262,7 @@ class Telephone:
 
         while True:
 
-            if GPIO.input(self.phone_pin):
+            if GPIO.input(self.phone_pin) and False:
                 self.phone_down()
             else:
                 self.phone_up()
@@ -276,6 +306,7 @@ def index():
 def main():
     global phone
     phone = Telephone(location)
+    phone.play_sound(sound_path.joinpath("beepSound.wav"), False, 0.5)
 
     print("Telephone app is running")
     # phone.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
