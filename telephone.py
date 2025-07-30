@@ -26,8 +26,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 root_path = Path(os.getcwd())
 print(f"root path of the script: {root_path}")
 sound_path = root_path.joinpath("sounds")
-# store the specific project sound files here and add them into the config json
 
+# store the specific project sound files here and add them into the config json
 parent_path = root_path.parent.joinpath("Pi_Telephone_files")
 
 sound_path_local = parent_path.joinpath("sounds")
@@ -263,7 +263,7 @@ class Telephone:
 
         while True:
 
-            if GPIO.input(self.phone_pin) and False:
+            if GPIO.input(self.phone_pin):
                 self.phone_down()
             else:
                 self.phone_up()
@@ -286,11 +286,15 @@ def set_language():
 @app.route("/incoming-call", methods=["POST"])
 def incoming_call():
     print("received an incoming call")
-    data = request.get_json()
-    if "caller" in data:
-        caller = data["caller"]
-        phone.play_sound(sound_path.joinpath("leon.wav"), True, 5)
-    return jsonify({"message": "incoming call from ", "caller": data}), 200
+
+    caller = request.get_json()
+    sound_file, sound_scale = phone.incoming_callers.get(caller)
+    print(phone.incoming_callers)
+    print(sound_scale)
+    print(f"{caller}: {sound_file}")
+    if sound_file:
+        phone.play_sound(sound_path_local.joinpath(phone.language + sound_file), False, sound_scale)
+    return jsonify({"message": "incoming call from ", "caller": caller}), 200
 
 
 def send_number(number):
