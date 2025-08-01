@@ -5,6 +5,7 @@
         "86753489": "TaxiGerst.wav"
     },
     "incoming": {
-        "leon": ["leon.wav", 5]
-    }
+        "leon": ["leon.wav", 2]
+    },
+    "ringtone": "ringtone.wav"
 }
