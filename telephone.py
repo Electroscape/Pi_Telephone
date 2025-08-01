@@ -185,7 +185,7 @@ class Telephone:
         timestamp = dt.now().strftime("%H:%M:%S")
         global dialed_numbers
         dialed_numbers.insert(0, f"{number}: {timestamp}")
-        dialed_numbers = dialed_numbers[-5:]
+        del dialed_numbers[5:]
 
     def check_number(self):
         self.call_active = True
@@ -194,13 +194,13 @@ class Telephone:
             sa.stop_all()
             sound_file = self.contacts.get(self.number_dialed, False)
             if sound_file:
+                self.add_to_history(sound_file)
                 self.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
                 self.sound_queue = [sound_path_local.joinpath(self.language + sound_file)]
                 self.sound_queue.append(sound_path.joinpath("beepSound.wav"))
-                self.add_to_history(sound_file)
             else:
-                self.play_sound(sound_path.joinpath("dialedWrongNumber.wav"))
                 self.add_to_history(self.number_dialed)
+                self.play_sound(sound_path.joinpath("dialedWrongNumber.wav"))
 
             self.reset_dialing()
         except Exception as exp:
@@ -288,6 +288,7 @@ class Telephone:
                 self.call_active = True
 
 
+phone = Telephone(location)
 
 @app.route("/set-language", methods=["POST"])
 def set_language():
@@ -307,12 +308,12 @@ def get_incoming_call():
 
     caller = request.get_json()
     sound_file, sound_scale = phone.incoming_callers.get(caller)
-    print(phone.incoming_callers)
-    print(sound_scale)
-    print(f"{caller}: {sound_file}")
     if sound_file:
         # phone.play_sound(sound_path_local.joinpath(phone.language + sound_file), False, sound_scale)
+        send_number(caller)
+        phone.add_to_history(caller)
         phone.handle_incoming_call = [sound_path_local.joinpath(phone.language + sound_file), sound_scale]
+
     return jsonify({"message": "incoming call from ", "caller": caller}), 200
 
 
@@ -336,14 +337,9 @@ def index():
     return render_template("index.html", incoming_callers=phone.incoming_callers)
 
 
-
 def main():
-    global phone
-    phone = Telephone(location)
     # phone.play_sound(sound_path.joinpath("beepSound.wav"), False, 0.5)
-
     print("Telephone app is running")
-    # phone.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
     # Debug True will cause a double instance of the telephone making a mulitple executions of sounds
     socketio.run(app, debug=False, host='0.0.0.0', port=5500, allow_unsafe_werkzeug=True)
 
