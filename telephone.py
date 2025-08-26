@@ -5,6 +5,8 @@ import os
 
 import simpleaudio as sa
 from pynput import keyboard
+from scipy.io import wavfile
+import numpy as np
 
 try:
     import RPi.GPIO as GPIO
@@ -18,14 +20,15 @@ from datetime import datetime as dt, timedelta
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 
+phone = None
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 root_path = Path(os.getcwd())
 print(f"root path of the script: {root_path}")
 sound_path = root_path.joinpath("sounds")
-# store the specific project sound files here and add them into the config json
 
+# store the specific project sound files here and add them into the config json
 parent_path = root_path.parent.joinpath("Pi_Telephone_files")
 
 sound_path_local = parent_path.joinpath("sounds")
@@ -52,42 +55,66 @@ location = argparser.parse_args().city
 dialed_numbers = []
 
 
+def get_scaled_sound(sound_file, volume):
+    rate, data = wavfile.read(sound_file)
+
+    # Normalize to int16 if needed
+    if data.dtype == np.int16:
+        scaled = (data * volume).astype(np.int16)
+    elif data.dtype == np.int32:
+        scaled = (data / (2 ** 16) * volume).astype(np.int16)
+    elif data.dtype == np.uint8:
+        # Center and scale unsigned 8-bit to signed 16-bit
+        centered = data.astype(np.int16) - 128
+        scaled = (centered * 256 * volume).astype(np.int16)
+    elif data.dtype == np.float32:
+        # Scale float [-1.0, 1.0] to int16
+        scaled = (data * 32767 * volume).astype(np.int16)
+    else:
+        raise ValueError(f"Unsupported WAV format: {data.dtype}")
+
+    # num_channels = 1 if len(scaled.shape) == 1 else scaled.shape[1]
+    # sa.play_buffer(scaled, num_channels, 2, rate)
+    return scaled
+
+
 class Telephone:
     def __init__(self, _location):
         cfg = self.__get_cfg()
         self.number_dialed = ""
-        # currently not used, but hard to see
-        self.max_digits = 12
         self.current_sound = None
         self.sound_queue = []
         self.key_events = []
         self.call_active = False
         self.play_obj = None
+        self.dial_delay = 3
+        self.phone_pin = 12
+        self.handle_incoming_call = False
+        GPIO.setup(self.phone_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        self.last_keypress = dt.now()
         self.lock = Lock()
+        self.running_call = False
+
+        self.pressed_keys = set()
+        self.listener = keyboard.Listener(
+            on_press=self.on_press,
+            on_release=self.on_release
+        )
+        self.listener.start()
+        self.location = _location
         try:
             self.contacts = cfg["contacts"]
+            self.incoming_callers = cfg["incoming"]
             self.language = "deu/"
-            self.dial_delay = 3
-            self.location = _location
+            self.ringtone_file = sound_path.joinpath(cfg["ringtone"])
+
             # set to board, board 12 is GPIO 18
-            self.phone_pin = 12
-            GPIO.setup(self.phone_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            self.last_keypress = dt.now()
-            self.running_call = False
-
-            self.pressed_keys = set()
-            self.listener = keyboard.Listener(
-                on_press=self.on_press,
-                on_release=self.on_release
-            )
-            self.listener.start()
-
-            self.loop = Thread(target=self.main_loop, daemon=True)
-            self.loop.start()
-
         except KeyError as er:
-            print()
+            print(er)
             # logging.error(er)
+
+        self.loop = Thread(target=self.main_loop, daemon=True)
+        self.loop.start()
 
     def on_press(self, key):
         with self.lock:
@@ -124,18 +151,24 @@ class Telephone:
             # logging.error(f"failed to fetch config file {err}")
             exit(f"failed to fetch config file {err}")
 
-
-    def play_sound(self, sound_file, dialing=False):
+    def play_sound(self, sound_file, dialing=False, volume=1):
         try:
             print(sound_file)
-            wave_obj = sa.WaveObject.from_wave_file(str(sound_file))
-            self.play_obj = wave_obj.play()
+            if volume == 1:
+                wave_obj = sa.WaveObject.from_wave_file(str(sound_file))
+                self.play_obj = wave_obj.play()
+            else:
+                rate, _ = wavfile.read(sound_file)
+                data = get_scaled_sound(sound_file, volume)
+
+                num_channels = 1 if len(data.shape) == 1 else data.shape[1]
+                bytes_per_sample = 2  # because we cast to int16
+                self.play_obj = sa.play_buffer(data, num_channels, bytes_per_sample, rate)
+
             if not dialing:
                 self.play_obj.wait_done()
         except FileNotFoundError:
-            # logging.error(f"failed to find sound {sound_file}")
             print(f"failed to find sound {sound_file}")
-            pass
 
     def set_german(self, is_german):
         if is_german:
@@ -152,7 +185,7 @@ class Telephone:
         timestamp = dt.now().strftime("%H:%M:%S")
         global dialed_numbers
         dialed_numbers.insert(0, f"{number}: {timestamp}")
-        dialed_numbers = dialed_numbers[-5:]
+        del dialed_numbers[5:]
 
     def check_number(self):
         self.call_active = True
@@ -161,13 +194,13 @@ class Telephone:
             sa.stop_all()
             sound_file = self.contacts.get(self.number_dialed, False)
             if sound_file:
+                self.add_to_history(sound_file)
                 self.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
                 self.sound_queue = [sound_path_local.joinpath(self.language + sound_file)]
                 self.sound_queue.append(sound_path.joinpath("beepSound.wav"))
-                self.add_to_history(sound_file)
             else:
-                self.play_sound(sound_path.joinpath("dialedWrongNumber.wav"))
                 self.add_to_history(self.number_dialed)
+                self.play_sound(sound_path.joinpath("dialedWrongNumber.wav"))
 
             self.reset_dialing()
         except Exception as exp:
@@ -232,15 +265,30 @@ class Telephone:
 
         while True:
 
-            if GPIO.input(self.phone_pin):
-                self.phone_down()
+            if not self.handle_incoming_call:
+                if GPIO.input(self.phone_pin):
+                    self.phone_down()
+                else:
+                    self.phone_up()
+
+                while perf_counter() - last_check_time < 0.02:
+                    pass  # Busy wait for 20ms
+                last_check_time = perf_counter()  # Reset timer
             else:
-                self.phone_up()
+                # stops the ongoing sounds and ongoing potential things
+                self.phone_down()
+                self.play_sound(self.ringtone_file, True, self.handle_incoming_call[1])
+                while GPIO.input(self.phone_pin):
+                    pass
+                self.phone_down()
+                self.play_sound(self.handle_incoming_call[0], False, self.handle_incoming_call[1])
+                self.handle_incoming_call = False
+                self.play_sound(sound_path.joinpath("beepSound.wav"))
+                # this way the idle sound is not played and the call terminated till put down again
+                self.call_active = True
 
-            while perf_counter() - last_check_time < 0.02:
-                pass  # Busy wait for 20ms
-            last_check_time = perf_counter()  # Reset timer
 
+phone = Telephone(location)
 
 @app.route("/set-language", methods=["POST"])
 def set_language():
@@ -251,6 +299,22 @@ def set_language():
         print(f"Language changed to: {selected_language}")
         return jsonify({"message": "Language updated", "language": selected_language}), 200
     return jsonify({"error": "Invalid request"}), 400
+
+
+
+@app.route("/incoming-call", methods=["POST"])
+def get_incoming_call():
+    print("received an incoming call")
+
+    caller = request.get_json()
+    sound_file, sound_scale = phone.incoming_callers.get(caller)
+    if sound_file:
+        # phone.play_sound(sound_path_local.joinpath(phone.language + sound_file), False, sound_scale)
+        send_number(caller)
+        phone.add_to_history(caller)
+        phone.handle_incoming_call = [sound_path_local.joinpath(phone.language + sound_file), sound_scale]
+
+    return jsonify({"message": "incoming call from ", "caller": caller}), 200
 
 
 def send_number(number):
@@ -270,18 +334,17 @@ def get_history():
 # Web route to render the frontend
 @app.route("/", methods=["GET", "POST"])
 def index():
-    return render_template("index.html")
+    return render_template("index.html", incoming_callers=phone.incoming_callers)
 
 
 def main():
-    global phone
-    phone = Telephone(location)
-
+    # phone.play_sound(sound_path.joinpath("beepSound.wav"), False, 0.5)
     print("Telephone app is running")
-    # phone.play_sound(sound_path.joinpath("014_wahl&rufzeichen.wav"))
     # Debug True will cause a double instance of the telephone making a mulitple executions of sounds
     socketio.run(app, debug=False, host='0.0.0.0', port=5500, allow_unsafe_werkzeug=True)
 
 
-if __name__ == '__main__':
+if '__main__' == __name__:
     main()
+
+
