@@ -38,14 +38,14 @@ if not sound_path_local.exists():
 
 GPIO.setmode(GPIO.BOARD)
 
-'''
+
 logging.basicConfig(
     filename='log.log',
-    level=logging.ERROR,
+    level=logging.DEBUG,
     format="{asctime} {levelname:<8} {message}",
     style='{'
 )
-'''
+
 
 argparser = argparse.ArgumentParser(description='Telephone')
 argparser.add_argument('-c', '--city', default='st', help='name of the city: [hh / st]')
@@ -102,7 +102,7 @@ class Telephone:
 
         except KeyError as er:
             print()
-            # logging.error(er)
+            logging.error(er)
 
     def on_press(self, key):
         with self.lock:
@@ -136,7 +136,7 @@ class Telephone:
             with open(config_path, 'r') as config_file:
                 return json.load(config_file)
         except (FileNotFoundError, ValueError) as err:
-            # logging.error(f"failed to fetch config file {err}")
+            logging.error(f"failed to fetch config file {err}")
             exit(f"failed to fetch config file {err}")
 
 
@@ -161,7 +161,7 @@ class Telephone:
             if not dialing:
                 self.play_obj.wait_done()
         except FileNotFoundError:
-            # logging.error(f"failed to find sound {sound_file}")
+            logging.error(f"failed to find sound {sound_file}")
             print(f"failed to find sound {sound_file}")
             self.play_obj = None
 
@@ -229,7 +229,7 @@ class Telephone:
             send_number(self.number_dialed)
             txt = "number dialed is " + self.number_dialed
             print(txt)
-            # logging.info(txt)
+            logging.info(txt)
 
     def phone_down(self):
         self.reset_dialing()
@@ -264,8 +264,10 @@ class Telephone:
                 
                 while not stop_event.is_set():
                     self.vlc_player.stop()
+                    sleep(0.5)
+                    self.vlc_player.audio_set_volume(160)  # Louder volume for ringing
                     self.vlc_player.play()
-                    sleep(0.1)  # Let playback start
+                    sleep(0.5)  # Let playback start
                     self.vlc_player.audio_set_volume(160)  # Louder volume for ringing
                     print(" Volume "+ str(self.vlc_player.audio_get_volume()))
                     sleep(0.5)  # Allow playback to begin
@@ -306,6 +308,15 @@ class Telephone:
             sleep(0.1)  # Let playback start
             self.vlc_player.audio_set_volume(75)  # Lower volume for private listening
 
+            if phone.language == "deu/":
+                os.system('sshpass -pEscapeHH2014 ssh 2cp@192.168.87.213 bash ~/Electroscape/r_The_Kidnapping/pi_music/end_music_deu.sh')
+                os.system('sshpass -pEscapeHH2014 ssh 2cp@192.168.87.166 bash ~/Electroscape/r_The_Kidnapping/pi_music/end_music_deu.sh')
+
+            else:
+                os.system('sshpass -pEscapeHH2014 ssh 2cp@192.168.87.213 bash ~/Electroscape/r_The_Kidnapping/pi_music/end_music_eng.sh')
+                os.system('sshpass -pEscapeHH2014 ssh 2cp@192.168.87.166 bash ~/Electroscape/r_The_Kidnapping/pi_music/end_music_eng.sh')
+
+
             while self.vlc_player.get_state() != vlc.State.Ended:
                 if GPIO.input(self.phone_pin) == GPIO.HIGH:  # Handset put down
                     self.vlc_player.stop()
@@ -315,7 +326,7 @@ class Telephone:
 
         except Exception as e:
             print(f"Error playing message: {e}")
-        
+        sleep(0.5)
         self.vlc_player = vlc.MediaPlayer(str(sound_path.joinpath("beepSound.wav")))
         self.vlc_player.play()
         sleep(0.1)  # Let playback start
@@ -363,7 +374,7 @@ def send_number(number):
         socketio.emit("update_number", number)
     except Exception as exp:
         print()
-        # logging.error(exp)
+        logging.error(exp)
 
 
 @app.route("/ring-phone", methods=["POST"])
