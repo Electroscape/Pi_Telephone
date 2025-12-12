@@ -1,5 +1,6 @@
 venv
 static/local_libs
-external_files_template
+*external_files_template*
 Pi_Telephone_files
 sounds/local_project
+*.log
