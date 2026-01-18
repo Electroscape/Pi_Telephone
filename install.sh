@@ -1,7 +1,7 @@
 #!/bin/bash
 # shellcheck disable=SC2164
 
-sudo apt-get install libopenblas-dev sshpass
+sudo apt install libopenblas-dev sshpass libasound2-dev python3-dev -y
 
 python3 -m venv venv
 source venv/bin/activate
