@@ -4,7 +4,10 @@ import logging
 import os
 
 import simpleaudio as sa
-from pynput import keyboard
+
+from evdev import InputDevice, list_devices, ecodes, categorize
+import threading
+
 from scipy.io import wavfile
 import numpy as np
 
@@ -38,14 +41,14 @@ if not sound_path_local.exists():
 
 GPIO.setmode(GPIO.BOARD)
 
-'''
+
 logging.basicConfig(
     filename='log.log',
     level=logging.ERROR,
     format="{asctime} {levelname:<8} {message}",
     style='{'
 )
-'''
+
 
 argparser = argparse.ArgumentParser(description='Telephone')
 argparser.add_argument('-c', '--city', default='st', help='name of the city: [hh / st]')
@@ -80,6 +83,9 @@ def get_scaled_sound(sound_file, volume):
 
 class Telephone:
     def __init__(self, _location):
+        self.devices = self.find_input_devices()
+        self.running = False
+
         cfg = self.__get_cfg()
         self.number_dialed = ""
         self.current_sound = None
@@ -96,11 +102,8 @@ class Telephone:
         self.running_call = False
 
         self.pressed_keys = set()
-        self.listener = keyboard.Listener(
-            on_press=self.on_press,
-            on_release=self.on_release
-        )
-        self.listener.start()
+        self.start() # keys listener
+        
         self.location = _location
         try:
             self.contacts = cfg["contacts"]
@@ -116,10 +119,61 @@ class Telephone:
         self.loop = Thread(target=self.main_loop, daemon=True)
         self.loop.start()
 
-    def on_press(self, key):
+    def find_input_devices(self):
+        devices = []
+        for path in list_devices():
+            device = InputDevice(path)
+
+            # Only devices that generate key events
+            if ecodes.EV_KEY in device.capabilities():
+                print(f"Listening on: {device.name} ({path})")
+                devices.append(device)
+
+        if not devices:
+            raise Exception("No keyboard-like input devices found")
+
+        return devices
+    
+    def listen_device(self, device):
+        for event in device.read_loop():
+            if not self.running:
+                break
+
+            if event.type == ecodes.EV_KEY:
+                key_event = categorize(event)
+                keycode = key_event.keycode
+
+                if isinstance(keycode, list):
+                    keycode = keycode[0]
+
+                if key_event.keystate == key_event.key_down:
+                    self.on_press(keycode)
+
+                elif key_event.keystate == key_event.key_up:
+                    self.on_release(keycode)
+
+    def start(self):
+        self.running = True
+        print("Telephone listener started...")
+
+        for device in self.devices:
+            thread = threading.Thread(
+                target=self.listen_device,
+                args=(device,),
+                daemon=True
+            )
+            thread.start()
+
+    def stop(self):
+        self.running = False
+
+    def on_press(self, keycode):
+        if not keycode.startswith("KEY_"):
+            return
+        
+        key_char = keycode.replace("KEY_", "")
         with self.lock:
             try:
-                key_char = key.char
                 if key_char in self.pressed_keys:
                     return  # Ignore repeated presses while key is held
 
@@ -130,10 +184,13 @@ class Telephone:
             except AttributeError:
                 pass  # Ignore special keys
 
-    def on_release(self, key):
+    def on_release(self, keycode):
+        if not keycode.startswith("KEY_"):
+            return
+        
+        key_char = keycode.replace("KEY_", "")
         with self.lock:
             try:
-                key_char = key.char
                 if key_char in self.pressed_keys:
                     self.pressed_keys.remove(key_char)  # Remove key when released
             except AttributeError:
@@ -346,5 +403,3 @@ def main():
 
 if '__main__' == __name__:
     main()
-
-

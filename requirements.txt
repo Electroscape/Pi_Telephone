@@ -1,4 +1,4 @@
-pynput==1.7.8
+evdev
 simpleaudio
 RPi.GPIO
 python-socketio==5.8.0
